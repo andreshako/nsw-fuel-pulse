@@ -24,14 +24,15 @@ This is a portfolio project, built as a companion to
 
 ## Project status
 
-The repo scaffold, the Fivetran connector (`connector/`), and the full dbt
-project (staging + marts + tests) exist. Field names throughout the
-connector and dbt layers are written against this project's best-known
-guess at the NSW Fuel API's shape, **not yet verified against a live
-subscription** -- see [Before running this for
-real](connector/README.md#before-running-this-for-real). The export
-script and dashboard are not built yet. See
-[Roadmap](#roadmap-future-iterations) below for the build order.
+The repo scaffold, the Fivetran connector (`connector/`), the full dbt
+project (staging + marts + tests), and the Google Sheets export script
+(`scripts/export_dashboard_snapshot.py`) exist. Field names throughout
+the connector and dbt layers are written against this project's
+best-known guess at the NSW Fuel API's shape, **not yet verified against
+a live subscription** -- see [Before running this for
+real](connector/README.md#before-running-this-for-real). Only the
+Tableau Public workbook itself is left, built by hand once real data is
+flowing -- see [Roadmap](#roadmap-future-iterations) below.
 
 ## Architecture
 
@@ -180,10 +181,21 @@ folder, which works because that dashboard is Streamlit, not Tableau
 Public). This is a deliberate design decision, not a workaround.
 
 Two tabs, shaped for the workbook I'll build by hand in Tableau Public's
-editor:
+editor. Both tabs must already exist in the target Sheet -- the export
+script only clears and rewrites existing tabs, it doesn't create new
+ones:
 
-- Current cheapest fuel by region (for a map)
-- Price-cycle trend data (for a line chart)
+| Sheet tab | Source mart | For |
+|---|---|---|
+| `current_by_station` | `mart_fuel_price_latest_by_station` | Map (lat/long per row) |
+| `price_cycle` | `mart_fuel_price_cycle` | Line chart |
+
+```bash
+python scripts/export_dashboard_snapshot.py
+```
+
+Clears and fully overwrites both tabs on every run (never appends), so a
+run with fewer rows than the last one never leaves stale rows behind.
 
 ## Data caveats
 
@@ -198,7 +210,11 @@ editor:
 
 ## Current limitations
 
-- No export script or dashboard yet. See [Project status](#project-status).
+- No Tableau workbook yet. See [Project status](#project-status).
+- The export script is verified for imports/syntax against the real
+  Google client libraries, but hasn't run against a live Sheet or real
+  mart data yet -- that needs a registered NSW Fuel API subscription and
+  real data flowing through first.
 - The connector's and dbt layer's field names are unverified against a
   live NSW Fuel API subscription -- see
   [connector/README.md](connector/README.md#before-running-this-for-real).
@@ -230,8 +246,10 @@ editor:
    `mart_fuel_price_daily_by_region`, `mart_fuel_price_cycle`, plus the
    grain/range/accepted-value tests described above.~~ Built and
    `dbt parse`/`dbt list`-verified; same field-name caveat as stages 2-3.
-5. **Export script** -- `scripts/export_dashboard_snapshot.py`, writing
-   the two dashboard-ready tabs to Google Sheets.
+5. ~~**Export script** -- `scripts/export_dashboard_snapshot.py`, writing
+   the two dashboard-ready tabs to Google Sheets.~~ Built and import/
+   syntax-verified against the real Google client libraries; not yet run
+   for real (needs a live Sheet, service-account key, and real mart data).
 6. **Tableau Public dashboard** -- built by hand against the Sheet, once
    its data is stable.
 7. **Optional: Snowflake target** -- a second dbt target using the
@@ -254,8 +272,8 @@ dbt/
                       mart_fuel_price_daily_by_region,
                       mart_fuel_price_cycle
   tests/             empty-mart guard, one singular test per mart
-scripts/             export_dashboard_snapshot.py -- writes marts to
-                     Google Sheets
+scripts/             export_dashboard_snapshot.py -- clears and rewrites
+                     two Google Sheet tabs from the marts
 docs/                data_source.md -- NSW Fuel API registration + endpoints
 .github/workflows/   ci.yml (structural validation, no secrets) and
                      scheduled_pipeline.yml (real build/test/export, every 6h)
