@@ -24,13 +24,13 @@ This is a portfolio project, built as a companion to
 
 ## Project status
 
-The repo scaffold, the Fivetran connector (`connector/`), and the dbt
-staging layer (`dbt/models/staging/`) exist. Both the connector's and the
-staging layer's field names are written against this project's best-known
+The repo scaffold, the Fivetran connector (`connector/`), and the full dbt
+project (staging + marts + tests) exist. Field names throughout the
+connector and dbt layers are written against this project's best-known
 guess at the NSW Fuel API's shape, **not yet verified against a live
 subscription** -- see [Before running this for
-real](connector/README.md#before-running-this-for-real). Marts and the
-export script are not built yet. See
+real](connector/README.md#before-running-this-for-real). The export
+script and dashboard are not built yet. See
 [Roadmap](#roadmap-future-iterations) below for the build order.
 
 ## Architecture
@@ -87,6 +87,43 @@ A fourth, narrowly-scoped Google Sheets service account (editor on one
 target Sheet only, nothing else in Drive) is used by
 `scripts/export_dashboard_snapshot.py`.
 
+## Data model
+
+- **"Region" means suburb.** The NSW Fuel API's reference data covers
+  stations/fuel types/brands, not a separate region list, so
+  `mart_fuel_price_daily_by_region` and `mart_fuel_price_cycle` group by
+  station suburb -- the finest geography actually available, rather than
+  an invented, unverified region concept.
+- **`mart_fuel_price_latest_by_station`** -- grain `(stationcode,
+  fueltype)`. The station's most recently reported price, inner-joined to
+  station details (not left-joined: an unmatched stationcode is dropped
+  rather than shown with NULL station details, so a broken join is a
+  visible row-count gap, not a misleading unlabeled map point).
+- **`mart_fuel_price_daily_by_region`** -- grain `(report_date, suburb,
+  fueltype)`. Aggregates each station's *last* reported price for the
+  day, not every intraday price change -- a station updating its price
+  three times in a day counts once, at its end-of-day price, so
+  frequently-updating stations don't get more weight in the regional
+  average than stable ones. `report_date` is the Sydney-local calendar
+  date (source timestamps are UTC).
+- **`mart_fuel_price_cycle`** -- grain `(report_date, suburb, fueltype)`,
+  built on the mart above. Day-over-day change via `LAG()`, plus rolling
+  7/14-day min/max via a window frame (same pattern as
+  `mart_daily_generation_trend` in australian-energy-pulse). The rolling
+  windows are the last 7/14 *rows* for a partition, not strictly the last
+  7/14 *calendar days* -- a suburb/fuel-type combination with a gap day
+  (no price updates at all) makes the window silently span more real days
+  than its name suggests. Not corrected here; see [Current
+  limitations](#current-limitations).
+- **Tests:** `not_null` and `accepted_values` on fuel type codes (and on
+  station state), composite grain uniqueness on every mart
+  (`dbt_utils.unique_combination_of_columns`), `dbt_utils.accepted_range`
+  sanity bounds on price (50-400 cents/litre -- generous, catches
+  impossible values like a unit error, not "unusually high" days), and a
+  singular test per mart asserting it isn't empty (`dbt/tests/`) -- added
+  proactively here after tfnsw-transit-pulse hit exactly that gap for
+  real (an always-empty mart that passed every schema test).
+
 ## dbt setup
 
 `dbt/` is a dbt-bigquery project (profile name `nsw_fuel_pulse`):
@@ -98,7 +135,10 @@ dbt/
   profiles.yml.example       # copy to profiles.yml (gitignored)
   models/
     staging/                 # stg_fuel_prices, stg_fuel_stations
-    marts/                   # mart_fuel_price_* -- not built yet
+    marts/                   # mart_fuel_price_latest_by_station,
+                              # mart_fuel_price_daily_by_region,
+                              # mart_fuel_price_cycle
+  tests/                     # empty-mart guards, one per mart
 ```
 
 ```bash
@@ -108,10 +148,11 @@ dbt deps
 dbt build
 ```
 
-Planned tests: `not_null` and `accepted_values` on fuel type codes,
-composite grain uniqueness (`dbt_utils.unique_combination_of_columns`),
-and `dbt_utils.accepted_range` sanity bounds on price so an obviously
-malformed reading can't silently enter a mart.
+Verified with the real `dbt-bigquery` adapter: `dbt parse`, `dbt list`,
+and dependency resolution (`mart_fuel_price_cycle` ->
+`mart_fuel_price_daily_by_region` -> staging -> sources) all succeed as
+expected. `dbt build`/`dbt test` need real BigQuery credentials -- see
+[CI](#ci) below.
 
 ## CI
 
@@ -157,16 +198,19 @@ editor:
 
 ## Current limitations
 
-- No dbt models, export script, or dashboard yet. See
-  [Project status](#project-status).
-- The connector's response parsing is unverified against a live NSW Fuel
-  API subscription -- see
+- No export script or dashboard yet. See [Project status](#project-status).
+- The connector's and dbt layer's field names are unverified against a
+  live NSW Fuel API subscription -- see
   [connector/README.md](connector/README.md#before-running-this-for-real).
 - No historical backfill: the pipeline's history starts the day the
   Fivetran connector's initial sync first runs -- the NSW Fuel API doesn't
   expose historical price data.
 - `mart_fuel_price_cycle`'s rolling 7/14-day windows will read as noise
-  until at least that many days of real data have accumulated.
+  until at least that many days of real data have accumulated, and are
+  measured in rows, not strictly calendar days -- see [Data
+  model](#data-model).
+- "Region" means suburb, not an official NSW region breakdown -- see
+  [Data model](#data-model) for why.
 
 ## Roadmap (future iterations)
 
@@ -182,9 +226,10 @@ editor:
    connector produces.~~ Built and `dbt parse`-verified; field names still
    need confirming against a live subscription (same caveat as the
    connector).
-4. **dbt marts and tests** -- `mart_fuel_price_latest_by_station`,
+4. ~~**dbt marts and tests** -- `mart_fuel_price_latest_by_station`,
    `mart_fuel_price_daily_by_region`, `mart_fuel_price_cycle`, plus the
-   grain/range/accepted-value tests described above.
+   grain/range/accepted-value tests described above.~~ Built and
+   `dbt parse`/`dbt list`-verified; same field-name caveat as stages 2-3.
 5. **Export script** -- `scripts/export_dashboard_snapshot.py`, writing
    the two dashboard-ready tabs to Google Sheets.
 6. **Tableau Public dashboard** -- built by hand against the Sheet, once
@@ -208,6 +253,7 @@ dbt/
   models/marts/      mart_fuel_price_latest_by_station,
                       mart_fuel_price_daily_by_region,
                       mart_fuel_price_cycle
+  tests/             empty-mart guard, one singular test per mart
 scripts/             export_dashboard_snapshot.py -- writes marts to
                      Google Sheets
 docs/                data_source.md -- NSW Fuel API registration + endpoints

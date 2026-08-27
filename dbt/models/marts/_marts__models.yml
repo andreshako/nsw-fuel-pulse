@@ -1,0 +1,166 @@
+version: 2
+
+models:
+  - name: mart_fuel_price_latest_by_station
+    description: >
+      Current price per station/fuel type, joined to station details.
+      Grain: one row per (stationcode, fueltype). Feeds the dashboard's
+      "current cheapest fuel by region" map tab.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - stationcode
+              - fueltype
+    columns:
+      - name: stationcode
+        description: Unique station identifier.
+        tests:
+          - not_null
+      - name: fueltype
+        description: >
+          Fuel type code. Accepted-values list is a best guess, not yet
+          confirmed against the API's own reference data (see
+          _staging__models.yml).
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["U91", "P95", "P98", "DL", "PDL", "E10", "LPG"]
+      - name: price_cents_per_litre
+        description: >
+          The station's most recently reported price for this fuel type,
+          in cents per litre. Range bounds are a sanity check against
+          impossible values (a unit error, a stray zero), not a
+          real-world price ceiling/floor.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 50
+                max_value: 400
+                inclusive: true
+      - name: last_updated_at
+        description: When the station operator last reported this price.
+        tests:
+          - not_null
+
+  - name: mart_fuel_price_daily_by_region
+    description: >
+      Daily avg/min/max price by station suburb and fuel type, one row
+      per (report_date, suburb, fueltype). Suburb is the grouping used
+      for "region" throughout this project -- the NSW Fuel API's
+      reference data covers stations/fuel types/brands, not a separate
+      region list, so this is the finest grain actually supportable
+      rather than an invented, unverified geography.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - report_date
+              - suburb
+              - fueltype
+    columns:
+      - name: report_date
+        description: Sydney-local calendar date this row summarizes.
+        tests:
+          - not_null
+      - name: suburb
+        description: Station suburb, carried through from station reference data.
+        tests:
+          - not_null
+      - name: fueltype
+        description: >
+          Fuel type code. Accepted-values list is a best guess -- see
+          mart_fuel_price_latest_by_station above.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["U91", "P95", "P98", "DL", "PDL", "E10", "LPG"]
+      - name: avg_price_cents_per_litre
+        description: >
+          Average of each contributing station's last reported price for
+          that day (not every intraday price change -- see the model's
+          header comment for why).
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 50
+                max_value: 400
+                inclusive: true
+      - name: min_price_cents_per_litre
+        description: Lowest station-day price contributing to this row.
+        tests:
+          - not_null
+      - name: max_price_cents_per_litre
+        description: Highest station-day price contributing to this row.
+        tests:
+          - not_null
+      - name: station_count
+        description: >
+          Number of distinct stations contributing to this row -- a low
+          count means the average is based on thin coverage for that
+          suburb/fuel type/day, worth surfacing rather than hiding.
+        tests:
+          - not_null
+
+  - name: mart_fuel_price_cycle
+    description: >
+      Day-over-day and rolling 7/14-day price-cycle metrics by suburb and
+      fuel type, built directly on mart_fuel_price_daily_by_region. Grain:
+      one row per (report_date, suburb, fueltype).
+
+      day_over_day_change_cents_per_litre and day_over_day_pct_change
+      compare a day's avg_price_cents_per_litre to the previous day's
+      value for the same suburb/fueltype (via LAG()). rolling_7day_* and
+      rolling_14day_* are min/max over the last 7/14 *rows* for that
+      partition, not strictly the last 7/14 *calendar days* -- a gap day
+      with no price updates makes the window span more real days than
+      its name suggests (see the model's header comment). All of these
+      are NULL or computed over a shorter window for each partition's
+      earliest available dates, since there's no prior day/full window
+      yet -- expected behaviour, not a data quality issue.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - report_date
+              - suburb
+              - fueltype
+    columns:
+      - name: report_date
+        tests:
+          - not_null
+      - name: suburb
+        tests:
+          - not_null
+      - name: fueltype
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["U91", "P95", "P98", "DL", "PDL", "E10", "LPG"]
+      - name: avg_price_cents_per_litre
+        description: Carried forward unchanged from mart_fuel_price_daily_by_region.
+        tests:
+          - not_null
+      - name: day_over_day_change_cents_per_litre
+        description: >
+          avg_price_cents_per_litre minus the previous day's value for
+          the same suburb/fueltype. NULL for each partition's first
+          available date.
+      - name: day_over_day_pct_change
+        description: >
+          Day-over-day percentage change. NULL for each partition's first
+          available date, and also NULL (not a division error) if the
+          previous day's price was zero.
+      - name: rolling_7day_min_price_cents_per_litre
+        description: See the model's header comment for the "rows, not calendar days" caveat.
+      - name: rolling_7day_max_price_cents_per_litre
+        description: See the model's header comment for the "rows, not calendar days" caveat.
+      - name: rolling_14day_min_price_cents_per_litre
+        description: See the model's header comment for the "rows, not calendar days" caveat.
+      - name: rolling_14day_max_price_cents_per_litre
+        description: See the model's header comment for the "rows, not calendar days" caveat.
