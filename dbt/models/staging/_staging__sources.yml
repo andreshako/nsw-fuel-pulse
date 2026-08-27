@@ -1,0 +1,61 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: "{{ env_var('BQ_RAW_DATASET', 'raw') }}"
+    tables:
+      - name: fuel_stations
+        description: >
+          Station/brand reference data written by the Fivetran connector's
+          fuel_stations table (../../connector/connector.py), refreshed in
+          full on every sync. Column names below are this project's
+          best-known guess at the NSW Fuel API's Get Reference Data
+          response shape -- NOT yet verified against a live subscription
+          (see connector/README.md#before-running-this-for-real). Confirm
+          and correct these once the connector has run for real.
+        columns:
+          - name: stationcode
+            description: Unique station identifier. Primary key.
+          - name: brand
+            description: Fuel retailer brand (e.g. "Shell", "BP", "7-Eleven").
+          - name: name
+            description: Station display name.
+          - name: address
+            description: Street address.
+          - name: suburb
+            description: Suburb.
+          - name: postcode
+            description: Postcode.
+          - name: state
+            description: >
+              State. Reference data covers NSW and TAS only, per the API's
+              documented scope.
+          - name: latitude
+          - name: longitude
+
+      - name: fuel_prices
+        description: >
+          Price observations written by the Fivetran connector's
+          fuel_prices table -- an append-only log, one row per price
+          update rather than overwritten in place (see
+          ../../connector/connector.py). Column names below are this
+          project's best-known guess at the NSW Fuel API's price response
+          shape -- NOT yet verified against a live subscription.
+        columns:
+          - name: stationcode
+            description: References fuel_stations.stationcode.
+          - name: fueltype
+            description: >
+              Fuel type code as reported by the API (e.g. "U91", "P95",
+              "P98", "DL", "E10"). Accepted values in
+              _staging__models.yml are a best guess, not yet confirmed
+              against the API's own Get Reference Data fuel-type list.
+          - name: price
+            description: >
+              Price in cents per litre, as reported by the station
+              operator (self-reported, may lag the actual bowser price).
+          - name: lastupdated
+            description: >
+              Timestamp the operator last reported this price. Forms
+              part of this table's grain together with
+              stationcode/fueltype.

@@ -24,12 +24,13 @@ This is a portfolio project, built as a companion to
 
 ## Project status
 
-The repo scaffold and the Fivetran connector (`connector/`) exist. The
-connector's response-parsing is written against this project's best-known
+The repo scaffold, the Fivetran connector (`connector/`), and the dbt
+staging layer (`dbt/models/staging/`) exist. Both the connector's and the
+staging layer's field names are written against this project's best-known
 guess at the NSW Fuel API's shape, **not yet verified against a live
 subscription** -- see [Before running this for
-real](connector/README.md#before-running-this-for-real). dbt models and
-the export script are not built yet. See
+real](connector/README.md#before-running-this-for-real). Marts and the
+export script are not built yet. See
 [Roadmap](#roadmap-future-iterations) below for the build order.
 
 ## Architecture
@@ -96,7 +97,7 @@ dbt/
   packages.yml              # dbt-labs/dbt_utils
   profiles.yml.example       # copy to profiles.yml (gitignored)
   models/
-    staging/                 # stg_fuel_prices, stg_fuel_stations -- not built yet
+    staging/                 # stg_fuel_prices, stg_fuel_stations
     marts/                   # mart_fuel_price_* -- not built yet
 ```
 
@@ -176,9 +177,11 @@ editor:
    Fivetran checkpoint/state.~~ Built; still needs validation against a
    live subscription (`fivetran debug`) and deployment via the Connector
    SDK's standard workflow -- see [connector/README.md](connector/README.md).
-3. **dbt staging models** -- `stg_fuel_prices`, `stg_fuel_stations`, and
+3. ~~**dbt staging models** -- `stg_fuel_prices`, `stg_fuel_stations`, and
    the `_staging__sources.yml` source contract for the raw tables the
-   connector produces.
+   connector produces.~~ Built and `dbt parse`-verified; field names still
+   need confirming against a live subscription (same caveat as the
+   connector).
 4. **dbt marts and tests** -- `mart_fuel_price_latest_by_station`,
    `mart_fuel_price_daily_by_region`, `mart_fuel_price_cycle`, plus the
    grain/range/accepted-value tests described above.

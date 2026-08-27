@@ -1,0 +1,63 @@
+version: 2
+
+models:
+  - name: stg_fuel_stations
+    description: >
+      One row per station: typed, cleaned reference data. Fivetran
+      refreshes the underlying source in full on every sync, so this view
+      always reflects the latest known station list.
+    columns:
+      - name: stationcode
+        description: Unique station identifier.
+        tests:
+          - not_null
+          - unique
+      - name: station_name
+        description: Station display name.
+        tests:
+          - not_null
+      - name: state
+        description: >
+          Reference data covers NSW and TAS only, per the API's
+          documented scope.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["NSW", "TAS"]
+
+  - name: stg_fuel_prices
+    description: >
+      One row per (stationcode, fueltype, last_updated_at) price update --
+      an append-only history of price changes, not a latest-price-only
+      table. See the model's own header comment for why.
+    columns:
+      - name: stationcode
+        description: References stg_fuel_stations.stationcode.
+        tests:
+          - not_null
+      - name: fueltype
+        description: >
+          Fuel type code as reported by the API. The accepted-values list
+          below is this project's best guess, not yet confirmed against
+          the API's own Get Reference Data fuel-type list -- expect to
+          revise it once real data is flowing.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["U91", "P95", "P98", "DL", "PDL", "E10", "LPG"]
+      - name: price_cents_per_litre
+        description: >
+          Price in cents per litre, self-reported by the station
+          operator. NULL if the raw value didn't cast cleanly (see the
+          model's safe_cast note) rather than failing the build.
+        tests:
+          - not_null
+      - name: last_updated_at
+        description: >
+          Timestamp the operator last reported this price. NULL if the
+          raw value didn't parse as a timestamp (see the model's
+          safe_cast note) rather than failing the build.
+        tests:
+          - not_null
