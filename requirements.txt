@@ -1,0 +1,11 @@
+dbt-bigquery>=1.8,<2
+google-cloud-bigquery>=3.25,<4
+google-api-python-client>=2.130,<3
+google-auth>=2.30,<3
+requests>=2.32,<3
+python-dotenv>=1.0,<2
+
+# Fivetran Connector SDK -- local development and `fivetran debug` only.
+# Not part of the deployed connector's own dependency list (see
+# connector/requirements.txt) -- Fivetran's runtime pre-installs the SDK.
+fivetran-connector-sdk>=1.0,<2

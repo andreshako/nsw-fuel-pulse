@@ -1,0 +1,30 @@
+# secrets / local config
+.env
+*-key.json
+*-keyfile.json
+gcp-service-account*.json
+credentials*.json
+connector/configuration.json
+
+# personal build log -- never committed
+docs/LEARNING_NOTES.md
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# dbt
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/profiles.yml
+dbt/package-lock.yml
+dbt/.user.yml
+
+# OS
+.DS_Store

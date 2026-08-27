@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    paths:
+      - 'dbt/**'
+      - 'requirements.txt'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'dbt/**'
+      - 'requirements.txt'
+      - '.github/workflows/ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dbt-parse:
+    name: Validate dbt project structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write local dbt profile
+        run: cp dbt/profiles.yml.example dbt/profiles.yml
+
+      - name: dbt deps
+        working-directory: dbt
+        run: dbt deps
+
+      # dbt parse only builds the manifest -- it never opens a warehouse
+      # connection, so the placeholder defaults baked into
+      # profiles.yml.example are enough. This job deliberately never
+      # touches real BigQuery data or needs any repo secrets; that's what
+      # .github/workflows/scheduled_pipeline.yml is for.
+      - name: dbt parse
+        working-directory: dbt
+        run: dbt parse

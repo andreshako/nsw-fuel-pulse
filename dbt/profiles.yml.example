@@ -1,0 +1,36 @@
+# Copy to dbt/profiles.yml for local development (gitignored -- never
+# commit real credentials).
+#
+# `dev` authenticates as the nsw-fuel-dbt-runner service account (Viewer on
+# `raw`, Editor on `staging`/`marts`) and is what local `dbt build` runs
+# use. `ci` authenticates as a separate, narrowly-scoped nsw-fuel-ci
+# service account via GOOGLE_APPLICATION_CREDENTIALS (written by
+# google-github-actions/auth in .github/workflows/scheduled_pipeline.yml)
+# -- deliberately not the same identity as `dev`, so a leaked GitHub
+# Actions secret and a leaked local dev key are two separate blast radii.
+#
+# GCP_PROJECT_ID, BQ_LOCATION, and DBT_KEYFILE all have safe placeholder
+# defaults below so `dbt parse` succeeds with zero secrets set -- that's
+# what lets .github/workflows/ci.yml validate the project structure on
+# every push without touching real BigQuery data.
+
+nsw_fuel_pulse:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('GCP_PROJECT_ID', 'ci-placeholder-project') }}"
+      dataset: analytics
+      location: "{{ env_var('BQ_LOCATION', 'australia-southeast1') }}"
+      keyfile: "{{ env_var('DBT_KEYFILE', 'ci-placeholder-keyfile.json') }}"
+      threads: 4
+
+    ci:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('GCP_PROJECT_ID', 'ci-placeholder-project') }}"
+      dataset: analytics
+      location: "{{ env_var('BQ_LOCATION', 'australia-southeast1') }}"
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS', 'ci-placeholder-keyfile.json') }}"
+      threads: 4

@@ -1,0 +1,72 @@
+# Runs the real, production pipeline every 6 hours: builds and tests the
+# dbt models against live BigQuery data, then exports the latest marts into
+# the Google Sheet that Tableau Public's dashboard reads from.
+#
+# NOTE: this workflow references dbt models and scripts/export_dashboard_
+# snapshot.py that don't exist yet as of the initial repo scaffold -- it
+# won't run successfully until the Fivetran connector, dbt staging/mart
+# models, and the export script are built in later iterations. It's
+# committed now so the automation shape is visible from the start.
+name: Scheduled pipeline
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # nsw-fuel-ci service account: narrowly scoped (Viewer on `raw`,
+      # Editor on `staging`/`marts`), deliberately a separate identity from
+      # the dbt-runner key used for local dev -- see dbt/profiles.yml.example.
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CI_SA_KEY }}
+
+      - name: Write dbt profile
+        run: cp dbt/profiles.yml.example dbt/profiles.yml
+
+      - name: dbt deps
+        working-directory: dbt
+        run: dbt deps
+
+      - name: dbt build
+        working-directory: dbt
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          BQ_LOCATION: australia-southeast1
+        run: dbt build --target ci
+
+      - name: dbt test
+        working-directory: dbt
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          BQ_LOCATION: australia-southeast1
+        run: dbt test --target ci
+
+      # Separate from the BigQuery service account above -- scoped as an
+      # editor on the one target Sheet only, nothing else.
+      - name: Write Google Sheets service-account key
+        run: echo '${{ secrets.GOOGLE_SHEETS_SA_KEY }}' > "$RUNNER_TEMP/sheets-key.json"
+
+      - name: Export dashboard snapshot to Google Sheets
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GOOGLE_SHEETS_KEYFILE: ${{ runner.temp }}/sheets-key.json
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+        run: python scripts/export_dashboard_snapshot.py
