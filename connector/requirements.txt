@@ -1,0 +1,7 @@
+# Fivetran's runtime pre-installs the fivetran_connector_sdk and requests
+# packages for every deployed connector -- do not list either here, or
+# deployment can fail with a version conflict. Add only extra third-party
+# dependencies the connector code itself imports.
+#
+# Empty for now -- the connector is built in a later iteration and is
+# expected to need nothing beyond `requests` (already provided).

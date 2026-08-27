@@ -24,9 +24,12 @@ This is a portfolio project, built as a companion to
 
 ## Project status
 
-**Scaffold stage.** The repo layout, dbt project config, `.env.example`,
-and GitHub Actions workflow shapes exist; the Fivetran connector, dbt
-models, and export script are not built yet. See
+The repo scaffold and the Fivetran connector (`connector/`) exist. The
+connector's response-parsing is written against this project's best-known
+guess at the NSW Fuel API's shape, **not yet verified against a live
+subscription** -- see [Before running this for
+real](connector/README.md#before-running-this-for-real). dbt models and
+the export script are not built yet. See
 [Roadmap](#roadmap-future-iterations) below for the build order.
 
 ## Architecture
@@ -153,9 +156,11 @@ editor:
 
 ## Current limitations
 
-- Nothing beyond the repo scaffold is built yet -- no connector, no dbt
-  models, no export script, no dashboard. See
+- No dbt models, export script, or dashboard yet. See
   [Project status](#project-status).
+- The connector's response parsing is unverified against a live NSW Fuel
+  API subscription -- see
+  [connector/README.md](connector/README.md#before-running-this-for-real).
 - No historical backfill: the pipeline's history starts the day the
   Fivetran connector's initial sync first runs -- the NSW Fuel API doesn't
   expose historical price data.
@@ -164,12 +169,13 @@ editor:
 
 ## Roadmap (future iterations)
 
-1. **Repo scaffold** -- folders, dbt project config, `.env.example`, CI
-   workflow shapes. *(this iteration)*
-2. **Fivetran connector** -- `connector/connector.py`: OAuth2 auth, initial
+1. ~~**Repo scaffold** -- folders, dbt project config, `.env.example`, CI
+   workflow shapes.~~ Done.
+2. ~~**Fivetran connector** -- `connector/connector.py`: OAuth2 auth, initial
    sync via Get All Prices, incremental sync via Get All New Prices with
-   Fivetran checkpoint/state, deployed via the Connector SDK's standard
-   REST API workflow.
+   Fivetran checkpoint/state.~~ Built; still needs validation against a
+   live subscription (`fivetran debug`) and deployment via the Connector
+   SDK's standard workflow -- see [connector/README.md](connector/README.md).
 3. **dbt staging models** -- `stg_fuel_prices`, `stg_fuel_stations`, and
    the `_staging__sources.yml` source contract for the raw tables the
    connector produces.
@@ -190,9 +196,10 @@ editor:
 ## Repository layout
 
 ```
-connector/          Fivetran Connector SDK connector (connector.py,
-                     requirements.txt -- own deploy manifest, separate
-                     from the repo root requirements.txt)
+connector/          Fivetran Connector SDK connector -- connector.py
+                     (schema/update wiring), nsw_fuel_client.py (API
+                     auth/HTTP), requirements.txt (own deploy manifest,
+                     separate from the repo root requirements.txt)
 dbt/
   models/staging/    stg_fuel_prices, stg_fuel_stations
   models/marts/      mart_fuel_price_latest_by_station,
