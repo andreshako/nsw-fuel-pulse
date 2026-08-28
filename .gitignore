@@ -5,6 +5,7 @@
 gcp-service-account*.json
 credentials*.json
 connector/configuration.json
+connector/files/
 
 # personal build log -- never committed
 docs/LEARNING_NOTES.md

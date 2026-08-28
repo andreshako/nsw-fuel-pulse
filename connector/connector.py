@@ -2,23 +2,25 @@
 
 Two tables:
 
-- `fuel_stations` -- station/brand/fuel-type reference data (Get Reference
-  Data v2). Refreshed in full on every sync; it's small, and there's no
-  cheap way to fetch only the stations that changed.
-- `fuel_prices` -- price observations. Initial sync pulls the full current
-  snapshot (Get All Prices v1); every sync after that pulls only the delta
-  (Get All New Prices v1), using a Fivetran-checkpointed cursor. Each price
-  update lands as its own row (see the primary key in `schema()` below) so
-  the raw table is an append-only log of price changes, not a
-  latest-value-only table -- the dbt marts need that history to compute
-  daily aggregates and rolling price-cycle windows.
+- `fuel_stations` -- station/brand reference data (Get Reference Data
+  v2). Refreshed in full on every sync; it's small, and there's no cheap
+  way to fetch only the stations that changed.
+- `fuel_prices` -- price observations. Each price update lands as its own
+  row (see the primary key in `schema()` below) so the raw table is an
+  append-only log of price changes, not a latest-value-only table -- the
+  dbt marts need that history to compute daily aggregates and rolling
+  price-cycle windows.
 
-CONFIRM BEFORE DEPLOYING: see nsw_fuel_client.py's module docstring. The
-field names read off each record below (`stationcode`, `fueltype`,
-`lastupdated`, ...) are this project's best-known guess at the NSW Fuel
-API's real response shape, not verified against a live subscription. Run
-`fivetran debug` locally first and adjust to match what actually comes
-back.
+Sync strategy, corrected after testing against the live API (see
+nsw_fuel_client.py's module docstring): NSW's Get All New Prices endpoint
+returns prices changed "since the last [Get All Prices] request... using
+the current API key for that day" -- a *daily*-scoped relationship, not
+a one-time "call full once, then delta forever" relationship. So this
+connector calls Get All Prices once per UTC calendar day (the first sync
+of that day) and Get All New Prices for every sync after that on the same
+day, tracked via `state["last_full_sync_date"]`. The first draft of this
+file assumed a client-supplied cursor timestamp instead, which doesn't
+match how the real API works.
 """
 
 from __future__ import annotations
@@ -38,16 +40,14 @@ def schema(configuration: dict):
     return [
         {
             "table": "fuel_stations",
-            "primary_key": ["stationcode"],
+            "primary_key": ["code"],
         },
         {
             # (stationcode, fueltype, lastupdated) as the key means a
             # price update that lands at the same station/fuel-type/
             # timestamp as an existing row overwrites it rather than
-            # duplicating -- a real but so-far-unobserved edge case if the
-            # API's `lastupdated` granularity is coarser than the true
-            # update frequency (e.g. minute-level timestamps with more
-            # than one update to the same pump in a minute).
+            # duplicating -- a real but so-far-unobserved edge case if
+            # two updates to the same pump land within the same second.
             "table": "fuel_prices",
             "primary_key": ["stationcode", "fueltype", "lastupdated"],
         },
@@ -61,29 +61,6 @@ def _require_configuration(configuration: dict) -> tuple[str, str]:
     return configuration["client_id"], configuration["client_secret"]
 
 
-def _response_cursor(raw_response: dict) -> str:
-    """The API's own response timestamp becomes next sync's cursor, not
-    "now" on our clock -- avoids a gap if this sync started running before
-    the API's underlying data was actually current. Falls back to the
-    current UTC time, logged clearly, if none of the candidate timestamp
-    keys are present -- better than crashing the sync, but means a
-    fallback-cursor sync could in principle miss updates that landed in
-    the gap between the true data timestamp and "now".
-    """
-    for key in ("timestamp", "Timestamp", "asAt", "responsetimestamp"):
-        value = raw_response.get(key)
-        if value:
-            return value
-    fallback = datetime.now(timezone.utc).isoformat()
-    log.warning(
-        "No recognized timestamp field in the API response "
-        f"(checked timestamp/Timestamp/asAt/responsetimestamp) -- "
-        f"falling back to current UTC time ({fallback}) as the next "
-        "sync's cursor."
-    )
-    return fallback
-
-
 def update(configuration: dict, state: dict):
     client_id, client_secret = _require_configuration(configuration)
     client = NSWFuelClient(client_id, client_secret)
@@ -91,18 +68,24 @@ def update(configuration: dict, state: dict):
     for station in client.get_reference_data():
         yield op.upsert("fuel_stations", station)
 
-    last_synced = state.get("last_synced")
-    if last_synced is None:
-        log.info("No prior state -- running initial sync (Get All Prices).")
-        result = client.get_all_prices()
-    else:
-        log.info(f"Prior state found -- running incremental sync since {last_synced}.")
-        result = client.get_new_prices(last_synced)
+    # UTC calendar date, not Sydney-local: the API doesn't document which
+    # timezone its own "day" boundary uses, and UTC is the safer default
+    # -- worst case (a timezone mismatch near local midnight) is one
+    # extra full-price pull instead of an incremental one, not data loss.
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    last_full_sync_date = state.get("last_full_sync_date")
 
-    for price in result["prices"]:
+    if last_full_sync_date != today:
+        log.info(f"No full sync yet today ({today}) -- running Get All Prices.")
+        prices = client.get_all_prices()
+    else:
+        log.info(f"Already ran today's full sync -- running Get All New Prices.")
+        prices = client.get_new_prices()
+
+    for price in prices:
         yield op.upsert("fuel_prices", price)
 
-    yield op.checkpoint({"last_synced": _response_cursor(result["raw"])})
+    yield op.checkpoint({"last_full_sync_date": today})
 
 
 connector = Connector(update=update, schema=schema)

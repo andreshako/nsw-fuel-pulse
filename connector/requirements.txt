@@ -3,5 +3,8 @@
 # deployment can fail with a version conflict. Add only extra third-party
 # dependencies the connector code itself imports.
 #
-# Empty for now -- the connector is built in a later iteration and is
-# expected to need nothing beyond `requests` (already provided).
+# Empty for now -- this connector needs nothing beyond `requests` (already
+# provided). NOTE: `fivetran debug` runs `pipreqs` internally and appears
+# to delete/regenerate this file as a side effect of that step -- if it's
+# missing after a local debug run, that's why; restore this committed
+# version rather than trusting whatever pipreqs auto-generates locally.

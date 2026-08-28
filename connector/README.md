@@ -11,16 +11,31 @@
   debugging. This is Fivetran's local-debug config, distinct from the repo
   root `.env` -- the deployed connector never reads `.env`.
 
-## Before running this for real
+## Verified against the live API
 
-The exact response shapes this connector parses (`nsw_fuel_client.py`'s
-`_items()` candidate keys, `connector.py`'s cursor field candidates) are
-this project's best-known guesses at NSW's API gateway conventions, not
-verified against a live subscription -- see the module docstrings and
-[`../docs/data_source.md`](../docs/data_source.md). Register, subscribe to
-the Fuel API product, and run `fivetran debug` locally before trusting
-this in a real sync; adjust the candidate keys to match whatever comes
-back.
+As of 2026-08-28, this connector has been run end-to-end with `fivetran
+debug` against the real NSW Fuel API (13,892 rows upserted: 3,316
+stations + 10,576 prices) -- not just guessed at. See
+[`../docs/data_source.md`](../docs/data_source.md) for the confirmed
+endpoint URLs, headers, and response shapes, and the module docstrings in
+`connector.py`/`nsw_fuel_client.py` for what was corrected from the first,
+unverified draft (wrong API host entirely, wrong endpoint versions,
+missing headers, and a different incremental-sync mechanism than
+originally assumed).
+
+One thing still unconfirmed: whether the `location` field (a nested
+`{latitude, longitude}` object) lands in real BigQuery as a native
+RECORD/STRUCT column (what `stg_fuel_stations.sql`'s `location.latitude`
+dot-access assumes) or as a JSON string -- `fivetran debug`'s local
+DuckDB warehouse stores it as JSON text, which may just be a debug-tool
+convenience rather than representative of real BigQuery schema inference.
+Confirm once a real sync has landed in BigQuery (see the root README's
+[Current limitations](../README.md#current-limitations)).
+
+`fivetran debug` also runs `pipreqs` internally as part of its own
+process, which was observed to delete `requirements.txt` in this
+directory as a side effect -- if it's missing after a local debug run,
+that's why; the committed version in git is unaffected.
 
 ## Local debugging
 
