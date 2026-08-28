@@ -8,54 +8,67 @@ sources:
         description: >
           Station/brand reference data written by the Fivetran connector's
           fuel_stations table (../../connector/connector.py), refreshed in
-          full on every sync. Column names below are this project's
-          best-known guess at the NSW Fuel API's Get Reference Data
-          response shape -- NOT yet verified against a live subscription
-          (see connector/README.md#before-running-this-for-real). Confirm
-          and correct these once the connector has run for real.
+          full on every sync. Column names verified against the live NSW
+          Fuel API on 2026-08-28 -- see connector/nsw_fuel_client.py's
+          module docstring for what was corrected from the first,
+          unverified draft.
         columns:
-          - name: stationcode
-            description: Unique station identifier. Primary key.
+          - name: code
+            description: >
+              Unique station identifier (a string, e.g. "972") -- despite
+              the name, this is the join key to fuel_prices.stationcode,
+              which the API reports as an integer for the same station.
+              Primary key.
           - name: brand
             description: Fuel retailer brand (e.g. "Shell", "BP", "7-Eleven").
           - name: name
             description: Station display name.
           - name: address
-            description: Street address.
-          - name: suburb
-            description: Suburb.
-          - name: postcode
-            description: Postcode.
+            description: >
+              Full street address as one string, e.g. "307-313 Ocean
+              Beach Road, UMINA BEACH NSW 2257" -- the API does not
+              provide suburb/postcode as separate fields; stg_fuel_stations
+              parses them out of this string (see that model's header
+              comment for the ~97% real-world match rate and known
+              failure modes).
           - name: state
             description: >
-              State. Reference data covers NSW and TAS only, per the API's
-              documented scope.
-          - name: latitude
-          - name: longitude
+              NSW, TAS, or (confirmed in real data, despite the
+              scheme's documented NSW+TAS-only coverage) ACT for a
+              handful of border-region stations.
+          - name: location
+            description: >
+              Nested record with `latitude`/`longitude` fields (not flat
+              top-level columns -- confirmed against real data).
 
       - name: fuel_prices
         description: >
           Price observations written by the Fivetran connector's
           fuel_prices table -- an append-only log, one row per price
           update rather than overwritten in place (see
-          ../../connector/connector.py). Column names below are this
-          project's best-known guess at the NSW Fuel API's price response
-          shape -- NOT yet verified against a live subscription.
+          ../../connector/connector.py). Column names verified against
+          the live NSW Fuel API on 2026-08-28.
         columns:
           - name: stationcode
-            description: References fuel_stations.stationcode.
+            description: >
+              Integer station id -- references fuel_stations.code (a
+              string) for the same station; confirmed 100% overlap
+              against a real snapshot, but the two columns have
+              different types and need an explicit cast to join.
           - name: fueltype
             description: >
-              Fuel type code as reported by the API (e.g. "U91", "P95",
-              "P98", "DL", "E10"). Accepted values in
-              _staging__models.yml are a best guess, not yet confirmed
-              against the API's own Get Reference Data fuel-type list.
+              Fuel type code. Confirmed values actually present in real
+              price data (a subset of the full Get Reference Data
+              fuel-type list, which also includes combo/display-only
+              codes like "P95-P98" that don't appear on individual price
+              rows): U91, P95, P98, E10, E85, DL, PDL, B20, LPG, EV.
           - name: price
             description: >
               Price in cents per litre, as reported by the station
               operator (self-reported, may lag the actual bowser price).
           - name: lastupdated
             description: >
-              Timestamp the operator last reported this price. Forms
-              part of this table's grain together with
-              stationcode/fueltype.
+              Timestamp the operator last reported this price, as a
+              string in DD/MM/YYYY HH:MM:SS format (confirmed against
+              real data -- not ISO 8601). Forms part of this table's
+              grain together with stationcode/fueltype.

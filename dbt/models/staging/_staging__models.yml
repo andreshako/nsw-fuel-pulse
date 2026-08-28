@@ -5,10 +5,13 @@ models:
     description: >
       One row per station: typed, cleaned reference data. Fivetran
       refreshes the underlying source in full on every sync, so this view
-      always reflects the latest known station list.
+      always reflects the latest known station list. suburb/postcode are
+      parsed from the API's single combined address string and are NULL
+      for the ~3% of real addresses that don't match the expected format
+      (see the model's header comment).
     columns:
       - name: stationcode
-        description: Unique station identifier.
+        description: Unique station identifier (sourced from the raw `code` column).
         tests:
           - not_null
           - unique
@@ -18,13 +21,14 @@ models:
           - not_null
       - name: state
         description: >
-          Reference data covers NSW and TAS only, per the API's
-          documented scope.
+          Confirmed against real data to include ACT for a handful of
+          border-region stations, despite the API's documented NSW+TAS-
+          only coverage.
         tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ["NSW", "TAS"]
+                values: ["NSW", "TAS", "ACT"]
 
   - name: stg_fuel_prices
     description: >
@@ -38,15 +42,15 @@ models:
           - not_null
       - name: fueltype
         description: >
-          Fuel type code as reported by the API. The accepted-values list
-          below is this project's best guess, not yet confirmed against
-          the API's own Get Reference Data fuel-type list -- expect to
-          revise it once real data is flowing.
+          Fuel type code. Values confirmed against a real snapshot of
+          price data on 2026-08-28 (a subset of the full Get Reference
+          Data fuel-type list, which also includes combo/display-only
+          codes that don't appear on individual price rows).
         tests:
           - not_null
           - accepted_values:
               arguments:
-                values: ["U91", "P95", "P98", "DL", "PDL", "E10", "LPG"]
+                values: ["U91", "P95", "P98", "E10", "E85", "DL", "PDL", "B20", "LPG", "EV"]
       - name: price_cents_per_litre
         description: >
           Price in cents per litre, self-reported by the station
@@ -57,7 +61,7 @@ models:
       - name: last_updated_at
         description: >
           Timestamp the operator last reported this price. NULL if the
-          raw value didn't parse as a timestamp (see the model's
-          safe_cast note) rather than failing the build.
+          raw value didn't parse (see the model's safe.parse_timestamp
+          note) rather than failing the build.
         tests:
           - not_null

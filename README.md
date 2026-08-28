@@ -24,23 +24,24 @@ This is a portfolio project, built as a companion to
 
 ## Project status
 
-The repo scaffold, the Fivetran connector (`connector/`), the full dbt
-project (staging + marts + tests), and the Google Sheets export script
-(`scripts/export_dashboard_snapshot.py`) exist. Field names throughout
-the connector and dbt layers are written against this project's
-best-known guess at the NSW Fuel API's shape, **not yet verified against
-a live subscription** -- see [Before running this for
-real](connector/README.md#before-running-this-for-real). Only the
-Tableau Public workbook itself is left, built by hand once real data is
+Everything is built, and the connector has been run end-to-end against
+the live NSW Fuel API with `fivetran debug` (13,892 rows synced) -- see
+[connector/README.md](connector/README.md#verified-against-the-live-api)
+for what that verification caught and corrected from the first,
+unverified draft. Real GCP infrastructure (a dedicated project, all four
+service accounts, the `raw`/`staging`/`marts` datasets) is provisioned
+and `dbt build` has been confirmed working against it live. What's left:
+deploying the connector to Fivetran for its first real scheduled sync,
+and building the Tableau Public workbook by hand once real data is
 flowing -- see [Roadmap](#roadmap-future-iterations) below.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[NSW Fuel API<br/>api.nsw.gov.au] -->|OAuth2 client credentials| B[Fivetran connector<br/>Connector SDK]
-    B -->|initial sync: Get All Prices| C[(BigQuery raw)]
-    B -->|incremental sync: Get All New Prices<br/>+ checkpointed cursor| C
+    A[NSW Fuel API<br/>api.onegov.nsw.gov.au] -->|OAuth2 client credentials| B[Fivetran connector<br/>Connector SDK]
+    B -->|first sync of the day: Get All Prices| C[(BigQuery raw)]
+    B -->|later syncs same day: Get All New Prices<br/>server-side daily delta, no cursor needed| C
     C -->|dbt source| D[stg_fuel_prices<br/>stg_fuel_stations]
     D --> E[mart_fuel_price_latest_by_station]
     D --> F[mart_fuel_price_daily_by_region]
@@ -62,9 +63,12 @@ touches. See [GCP service accounts](#gcp-service-accounts) below.
 
 ## Data source
 
-NSW Fuel API (`api.nsw.gov.au`) -- OAuth2 client-credentials auth, free
-registration. See [`docs/data_source.md`](docs/data_source.md) for the
-full registration steps, endpoint list, and coverage caveats.
+NSW Fuel API -- OAuth2 client-credentials auth, free registration at
+`api.nsw.gov.au` (the developer portal; the real API host,
+`api.onegov.nsw.gov.au`, is different -- see
+[`docs/data_source.md`](docs/data_source.md) for why that distinction
+matters). See that doc for the full registration steps, confirmed
+endpoint URLs/headers/response shapes, and coverage caveats.
 
 ### Attribution
 
@@ -94,7 +98,11 @@ target Sheet only, nothing else in Drive) is used by
   stations/fuel types/brands, not a separate region list, so
   `mart_fuel_price_daily_by_region` and `mart_fuel_price_cycle` group by
   station suburb -- the finest geography actually available, rather than
-  an invented, unverified region concept.
+  an invented, unverified region concept. Suburb itself is parsed out of
+  the API's single combined address string (there's no dedicated
+  suburb/postcode field) and is NULL for the ~3% of real addresses that
+  don't match the expected format -- confirmed against a real snapshot,
+  not assumed; see `dbt/models/staging/stg_fuel_stations.sql`.
 - **`mart_fuel_price_latest_by_station`** -- grain `(stationcode,
   fueltype)`. The station's most recently reported price, inner-joined to
   station details (not left-joined: an unmatched stationcode is dropped
@@ -210,21 +218,31 @@ run with fewer rows than the last one never leaves stale rows behind.
 
 ## Current limitations
 
-- No Tableau workbook yet. See [Project status](#project-status).
+- No Tableau workbook yet, and the connector isn't deployed to Fivetran
+  for scheduled production syncs yet -- see [Project status](#project-status).
 - The export script is verified for imports/syntax against the real
-  Google client libraries, but hasn't run against a live Sheet or real
-  mart data yet -- that needs a registered NSW Fuel API subscription and
-  real data flowing through first.
-- The connector's and dbt layer's field names are unverified against a
-  live NSW Fuel API subscription -- see
-  [connector/README.md](connector/README.md#before-running-this-for-real).
+  Google client libraries and a real Google Sheet (confirmed shared
+  correctly with the export service account), but hasn't run against
+  real mart data yet -- that needs the connector's first real sync.
+- Whether the station reference data's nested `location` field
+  (latitude/longitude) lands in real BigQuery as a native RECORD/STRUCT
+  column, or as a JSON string, is unconfirmed -- `fivetran debug`'s local
+  DuckDB warehouse stores it as JSON text, which may not represent real
+  BigQuery schema inference. `stg_fuel_stations.sql`'s `location.latitude`
+  dot-access assumes the former; confirm once a real sync lands.
+- Suburb/postcode are parsed from a single combined address string with
+  no dedicated fields (~97% match rate on a real snapshot) -- see [Data
+  model](#data-model).
 - No historical backfill: the pipeline's history starts the day the
-  Fivetran connector's initial sync first runs -- the NSW Fuel API doesn't
+  Fivetran connector's first real sync runs -- the NSW Fuel API doesn't
   expose historical price data.
 - `mart_fuel_price_cycle`'s rolling 7/14-day windows will read as noise
   until at least that many days of real data have accumulated, and are
   measured in rows, not strictly calendar days -- see [Data
   model](#data-model).
+- The NSW Fuel API's free tier caps at 2,500 calls/month and 5 calls/
+  minute -- worth keeping in mind alongside Fivetran's own sync-frequency
+  limits when choosing how often this runs.
 - "Region" means suburb, not an official NSW region breakdown -- see
   [Data model](#data-model) for why.
 

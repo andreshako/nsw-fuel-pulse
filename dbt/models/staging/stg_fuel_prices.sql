@@ -4,11 +4,17 @@
 -- "current price" and daily/rolling aggregates from this full history, so
 -- staging deliberately does not collapse to latest-per-station here.
 --
--- safe_cast, not cast, on last_updated_at: the API's real timestamp
--- string format is unconfirmed (see _staging__sources.yml), so a
--- format mismatch surfaces as a NULL caught by this model's not_null
--- test in _staging__models.yml, not a hard model-build failure -- easier
--- to debug once real data is flowing.
+-- stationcode cast to string: the raw column is an integer, but
+-- stg_fuel_stations.stationcode (sourced from the reference data's
+-- `code` field) is a string for the same station id -- confirmed 100%
+-- overlap against a real snapshot, but the two need a matching type to
+-- join on.
+--
+-- last_updated_at: the raw `lastupdated` string is DD/MM/YYYY HH:MM:SS
+-- (confirmed against real data, e.g. "26/08/2026 09:05:17"), not ISO
+-- 8601 -- safe.parse_timestamp with an explicit format, not a plain
+-- cast, which would silently return NULL on every row against this
+-- format.
 
 with source as (
 
@@ -20,13 +26,13 @@ with source as (
 renamed as (
 
     select
-        stationcode,
+        safe_cast(stationcode as string) as stationcode,
         fueltype,
         safe_cast(price as numeric) as price_cents_per_litre,
-        safe_cast(lastupdated as timestamp) as last_updated_at
+        safe.parse_timestamp('%d/%m/%Y %H:%M:%S', lastupdated) as last_updated_at
 
     from source
-    where stationcode is not null and stationcode != ''
+    where stationcode is not null
       and fueltype is not null and fueltype != ''
       and lastupdated is not null and lastupdated != ''
 

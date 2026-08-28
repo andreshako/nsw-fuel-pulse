@@ -19,41 +19,116 @@ Reporting Scheme, refreshed as operators submit updates through the day.
    price endpoints). Subscription may require manual approval by the API
    owner before calls succeed -- don't assume the key is live immediately
    after subscribing.
-4. Put the client id/secret in `.env` as `NSW_FUEL_API_CLIENT_ID` /
-   `NSW_FUEL_API_CLIENT_SECRET` (see `.env.example`). Never commit them.
+4. Put the client id/secret in `connector/configuration.json` (see
+   `connector/configuration.json.example`) for local `fivetran debug`
+   testing -- never commit them.
+
+Free trial: **2,500 calls/month**, with a hard cap of **5 calls/minute**
+for unauthenticated/trial-tier usage -- worth keeping in mind when
+choosing a sync schedule (see the root README's automation section).
 
 ## Access method
 
-**Auth**: OAuth2 client-credentials grant. The application's client
-id/secret are exchanged for a short-lived bearer access token against the
-portal's token endpoint, then that token is sent as an `Authorization:
-Bearer <token>` header on each API call. The exact token endpoint path,
-required headers (NSW's API gateway has historically required an
-`apikey`/`transactionid`/`requesttimestamp` header set on top of the OAuth
-token for some products), and token lifetime are documented per-product in
-the portal's Swagger/API docs once you're subscribed -- confirm them there
-rather than trusting a hardcoded guess, the same way this project's sibling
-repo (tfnsw-transit-pulse) had to confirm its own feed URL after TfNSW
-changed it. This will be pinned down precisely when the connector is built.
+Everything below is confirmed against the *live* API (verified
+2026-08-28), not guessed -- including using NSW's own published public
+trial credentials from the [Fuel API product
+page](https://api.nsw.gov.au/Product/Index/22) before this project's own
+registration was even approved.
+
+**The real API host is `api.onegov.nsw.gov.au`** -- `api.nsw.gov.au` is
+only the developer portal for registration and documentation; it 404s on
+every actual API call. This tripped up the first draft of the connector.
+
+**Auth**: OAuth2 client-credentials grant, HTTP Basic auth with the
+client id/secret as username/password:
+
+```
+GET https://api.onegov.nsw.gov.au/oauth/client_credential/accesstoken?grant_type=client_credentials
+Authorization: Basic <base64(client_id:client_secret)>
+```
+
+Returns a bearer token (`access_token` field) valid for ~12 hours
+(`expires_in` in the response, seconds).
+
+**Every other call** needs four headers beyond the bearer token:
+
+```
+Authorization: Bearer <access_token>
+apikey: <client_id>
+transactionid: <a fresh unique value per request, e.g. a UUID>
+requesttimestamp: <DD/MM/YYYY HH:MM:SS AM/PM>
+Content-Type: application/json; charset=utf-8
+```
 
 ## Key endpoints
 
 | Endpoint | Version | Purpose | Used for |
 |---|---|---|---|
-| Get Reference Data | v2 | NSW + TAS lists of stations, fuel types, and brands | Station/fuel-type/brand dimension data |
-| Get All Prices | v1 | Full current snapshot of all reported prices | Initial sync |
-| Get All New Prices | v1 | Delta of prices changed since the last call | Incremental syncs |
+| Get Reference Data | v2 (`/FuelCheckRefData/v2/fuel/lovs`) | NSW + TAS lists of stations, fuel types, and brands | Station dimension data |
+| Get All Prices | v2 (`/FuelPriceCheck/v2/fuel/prices`) | Full current snapshot of all reported prices | First sync of each day |
+| Get All New Prices | v2 (`/FuelPriceCheck/v2/fuel/prices/new`) | Prices changed since this API key's last Get All Prices call **that day** | Every sync after the first that day |
 
-`Get All New Prices` is what makes an efficient incremental Fivetran sync
-possible -- pulling the full snapshot on every sync would be wasteful once
-the initial load is done. The exact cursor/paging shape of the delta
-response, and how it maps to Fivetran's checkpoint state, is worked out
-when the connector is built.
+Get All New Prices needs **no request parameter or cursor** -- it's
+tracked server-side, per API key, reset daily. This connector calls Get
+All Prices once per UTC calendar day and Get All New Prices for every
+sync after that on the same day (see
+`connector/connector.py`'s module docstring) -- corrected from the first
+draft's assumption of a client-supplied `modifiedsince` cursor, which
+isn't how the real API works.
 
 ## Response shape
 
-Not yet documented here -- captured from the live API once the connector
-is being built, rather than guessed at up front.
+**Get Reference Data** (`/FuelCheckRefData/v2/fuel/lovs`) -- each list
+wrapped under an `items` key:
+
+```json
+{
+  "brands": {"items": [{"name": "BP", "state": "NSW"}, ...]},
+  "fueltypes": {"items": [{"code": "U91", "name": "Unleaded 91", "state": "NSW"}, ...]},
+  "stations": {"items": [
+    {
+      "brandid": "", "stationid": "", "brand": "United", "code": "972",
+      "name": "United Petroleum Umina",
+      "address": "307-313 Ocean Beach Road, UMINA BEACH NSW 2257",
+      "location": {"latitude": -33.511231, "longitude": 151.318092},
+      "state": "NSW"
+    }
+  ]},
+  "trendperiods": {"items": [...]},
+  "sortfields": {"items": [...]}
+}
+```
+
+Note: no separate suburb/postcode fields -- only the single combined
+`address` string. `stg_fuel_stations.sql` parses suburb/postcode out of it
+via regex, matching ~97% of a real snapshot (see that model's own header
+comment for the confirmed failure modes).
+
+**Get All Prices** / **Get All New Prices** -- flat lists, **not** wrapped
+in `items` (a different shape from Reference Data, despite both
+responses being called "stations"):
+
+```json
+{
+  "stations": [ /* same station shape as above, not used by this connector -- see nsw_fuel_client.py */ ],
+  "prices": [
+    {"stationcode": 1, "state": "NSW", "fueltype": "DL", "price": 258.9, "lastupdated": "26/08/2026 09:05:17"}
+  ]
+}
+```
+
+Two things to know about this shape:
+- `stationcode` here is an **integer**; `stations[].code` in Reference
+  Data is a **string** for the same station (confirmed 100% overlap
+  against a real 3,275-station snapshot) -- `stg_fuel_prices.sql` casts
+  to match.
+- `lastupdated` is `DD/MM/YYYY HH:MM:SS`, not ISO 8601 -- parsed with an
+  explicit format string, not a plain cast.
+
+Confirmed real `fueltype` values on actual price rows (a subset of Get
+Reference Data's full fuel-type list, which also includes combo/display
+codes like `P95-P98` that don't appear on individual price rows): `U91`,
+`P95`, `P98`, `E10`, `E85`, `DL`, `PDL`, `B20`, `LPG`, `EV`.
 
 ## Coverage caveats
 
@@ -61,8 +136,10 @@ is being built, rather than guessed at up front.
   independently, and may lag the actual price at the bowser.
 - Reporting compliance can vary by station and by region -- absence of a
   price update does not necessarily mean the price didn't change.
-- The Fuel Price Reporting Scheme's reference data covers **NSW and TAS**
-  only.
+- The Fuel Price Reporting Scheme's reference data is documented as NSW +
+  TAS only, but a real snapshot shows a handful of `ACT` stations too
+  (border-region stations, e.g. near Queanbeyan/Canberra) -- confirmed in
+  live data, not assumed from the docs alone.
 
 ## Attribution
 
