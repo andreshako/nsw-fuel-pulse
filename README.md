@@ -259,12 +259,8 @@ run with fewer rows than the last one never leaves stale rows behind.
 
 ## Current limitations
 
-- No Tableau workbook yet -- everything else is live, see [Project
-  status](#project-status).
-- The export script is verified for imports/syntax against the real
-  Google client libraries and a real Google Sheet (confirmed shared
-  correctly with the export service account), but hasn't written real
-  mart data to it yet.
+- No Tableau workbook yet -- everything else is live and populated, see
+  [Project status](#project-status).
 - `location`'s nested latitude/longitude land in real BigQuery as a
   native `JSON`-typed column, not a STRUCT/RECORD -- confirmed against a
   real production sync (the local `fivetran debug` DuckDB warehouse
@@ -309,9 +305,8 @@ run with fewer rows than the last one never leaves stale rows behind.
    against real data (37 pass, 2 deliberate warnings -- see [Data
    model](#data-model)).
 5. ~~**Export script** -- `scripts/export_dashboard_snapshot.py`, writing
-   the two dashboard-ready tabs to Google Sheets.~~ Built and verified
-   against the real Google client libraries and a real, correctly-shared
-   Google Sheet; not yet run with real mart data flowing through it.
+   the two dashboard-ready tabs to Google Sheets.~~ Run for real: 10,574
+   rows in `current_by_station`, 9,146 in `price_cycle`.
 6. **Tableau Public dashboard** -- built by hand against the Sheet, once
    the export script has run against real mart data and a few days of
    price-cycle history have accumulated.
