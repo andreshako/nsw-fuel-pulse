@@ -103,11 +103,26 @@ def main() -> None:
     load_dotenv()
     project_id, sheets_keyfile, sheet_id = _require_env()
 
-    bq_client = bigquery.Client(project=project_id)
-    credentials = service_account.Credentials.from_service_account_file(
+    # Explicit credentials for BigQuery, not bare bigquery.Client(project=...)
+    # relying on ambient Application Default Credentials -- that only works
+    # if GOOGLE_APPLICATION_CREDENTIALS happens to already be set in the
+    # shell (true in scheduled_pipeline.yml, since google-github-actions/auth
+    # sets it; not true for a plain local run, which would otherwise fail
+    # with an unhelpful "default credentials not found" error). Reuses
+    # DBT_KEYFILE -- the same nsw-fuel-dbt-runner identity already has read
+    # access to marts, so there's no need for a fifth service account just
+    # for this script.
+    dbt_keyfile = os.environ.get("DBT_KEYFILE", "")
+    if dbt_keyfile:
+        bq_credentials = service_account.Credentials.from_service_account_file(dbt_keyfile)
+        bq_client = bigquery.Client(project=project_id, credentials=bq_credentials)
+    else:
+        bq_client = bigquery.Client(project=project_id)
+
+    sheets_credentials = service_account.Credentials.from_service_account_file(
         sheets_keyfile, scopes=SHEETS_SCOPES
     )
-    sheets_service = build("sheets", "v4", credentials=credentials)
+    sheets_service = build("sheets", "v4", credentials=sheets_credentials)
 
     for tab_name, table in SHEET_TABS.items():
         header, rows = _fetch_rows(bq_client, project_id, table)
