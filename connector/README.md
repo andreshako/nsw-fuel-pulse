@@ -23,14 +23,24 @@ unverified draft (wrong API host entirely, wrong endpoint versions,
 missing headers, and a different incremental-sync mechanism than
 originally assumed).
 
-One thing still unconfirmed: whether the `location` field (a nested
-`{latitude, longitude}` object) lands in real BigQuery as a native
-RECORD/STRUCT column (what `stg_fuel_stations.sql`'s `location.latitude`
-dot-access assumes) or as a JSON string -- `fivetran debug`'s local
-DuckDB warehouse stores it as JSON text, which may just be a debug-tool
-convenience rather than representative of real BigQuery schema inference.
-Confirm once a real sync has landed in BigQuery (see the root README's
-[Current limitations](../README.md#current-limitations)).
+**Update, confirmed against a real production sync:** the `location`
+field lands in real BigQuery as a native `JSON`-typed column, not a
+STRUCT/RECORD -- `stg_fuel_stations.sql` uses `lax_float64()` (BigQuery's
+lenient JSON-to-scalar extraction) rather than the plain-cast dot-access
+this section originally flagged as unverified.
+
+Also confirmed against the real production sync (not just the local
+DuckDB debug warehouse): station `code` is typed `INT64` in real
+BigQuery, despite the API's JSON returning it as a string -- the same
+type as `fuel_prices.stationcode`. `stg_fuel_stations.sql` casts both to
+`STRING` for a consistent join key.
+
+**And a real Fivetran platform behavior, not obvious from the docs:** the
+destination dataset this connector actually writes to is named after the
+*connection name* (`nsw_fuel_pulse`), not the BigQuery destination's own
+"Dataset name" setting -- that field doesn't control this for Connector
+SDK connections the way the Fivetran UI implies. Set `BQ_RAW_DATASET` in
+`.env` to match whatever you actually name your connection.
 
 `fivetran debug` also runs `pipreqs` internally as part of its own
 process, which was observed to delete `requirements.txt` in this

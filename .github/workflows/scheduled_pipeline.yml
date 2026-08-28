@@ -50,6 +50,13 @@ jobs:
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           BQ_LOCATION: australia-southeast1
+          # Confirmed against a real Fivetran sync: the Connector SDK
+          # integration names the destination dataset after the
+          # *connection* name, not the BigQuery destination's own
+          # "Dataset name" setting -- so this is nsw_fuel_pulse (the
+          # connection name), not "raw" as originally designed. See
+          # README's Current limitations / connector/README.md.
+          BQ_RAW_DATASET: nsw_fuel_pulse
         run: dbt build --target ci
 
       - name: dbt test
@@ -57,6 +64,13 @@ jobs:
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           BQ_LOCATION: australia-southeast1
+          # Confirmed against a real Fivetran sync: the Connector SDK
+          # integration names the destination dataset after the
+          # *connection* name, not the BigQuery destination's own
+          # "Dataset name" setting -- so this is nsw_fuel_pulse (the
+          # connection name), not "raw" as originally designed. See
+          # README's Current limitations / connector/README.md.
+          BQ_RAW_DATASET: nsw_fuel_pulse
         run: dbt test --target ci
 
       # Separate from the BigQuery service account above -- scoped as an
