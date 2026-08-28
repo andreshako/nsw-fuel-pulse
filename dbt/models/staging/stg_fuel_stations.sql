@@ -4,6 +4,22 @@
 -- every sync (see connector/connector.py), so there's no dedup/history
 -- concern the way there is for stg_fuel_prices.
 --
+-- code cast to string: confirmed against a real production sync (not
+-- just the local `fivetran debug` DuckDB warehouse, which -- misleadingly
+-- -- displayed it looking like a string) that Fivetran's real BigQuery
+-- schema inference typed this column as INT64, since every station code
+-- happens to be all-digits. Cast to string to match
+-- stg_fuel_prices.stationcode (also cast to string there) for the join.
+--
+-- location.latitude/longitude use lax_float64(), not safe_cast(): also
+-- confirmed against a real production sync, `location` lands in BigQuery
+-- as a native JSON-typed column, not a STRUCT/RECORD -- a plain CAST
+-- from JSON to FLOAT64 errors outright, unlike a genuine type mismatch
+-- that safe_cast/safe_cast would just NULL out. lax_float64() is
+-- BigQuery's purpose-built lenient JSON-to-scalar extraction, matching
+-- this project's "NULL on failure, not a broken build" philosophy for
+-- exactly this situation.
+--
 -- suburb/postcode: the API only provides a single combined address
 -- string (e.g. "307-313 Ocean Beach Road, UMINA BEACH NSW 2257"), not
 -- separate fields. Parsed here via regex, matching ~97% of a real
@@ -26,7 +42,7 @@ with source as (
 renamed as (
 
     select
-        code as stationcode,
+        safe_cast(code as string) as stationcode,
         brand,
         name as station_name,
         address,
@@ -36,12 +52,11 @@ renamed as (
         state,
         regexp_extract(address, r',\s*(.+?)\s+(?:NSW|TAS|ACT)\s+\d{4}\s*$') as suburb,
         regexp_extract(address, r'(\d{4})\s*$') as postcode,
-        safe_cast(location.latitude as float64) as latitude,
-        safe_cast(location.longitude as float64) as longitude
+        lax_float64(location.latitude) as latitude,
+        lax_float64(location.longitude) as longitude
 
     from source
     where code is not null
-      and code != ''
 
 )
 

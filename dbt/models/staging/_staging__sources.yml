@@ -15,10 +15,14 @@ sources:
         columns:
           - name: code
             description: >
-              Unique station identifier (a string, e.g. "972") -- despite
-              the name, this is the join key to fuel_prices.stationcode,
-              which the API reports as an integer for the same station.
-              Primary key.
+              Unique station identifier. The API's JSON returns this as a
+              string (e.g. "972"), but Fivetran's real BigQuery schema
+              inference types it as INT64 since every value happens to be
+              all-digits -- confirmed against a real production sync, not
+              just the local `fivetran debug` DuckDB warehouse (which
+              misleadingly displayed it looking like a string). Same
+              station id as fuel_prices.stationcode (also INT64). Primary
+              key.
           - name: brand
             description: Fuel retailer brand (e.g. "Shell", "BP", "7-Eleven").
           - name: name

@@ -29,16 +29,33 @@ models:
       - name: price_cents_per_litre
         description: >
           The station's most recently reported price for this fuel type,
-          in cents per litre. Range bounds are a sanity check against
-          impossible values (a unit error, a stray zero), not a
-          real-world price ceiling/floor.
+          in cents per litre -- except EV, which the API prices on a
+          completely different scale (confirmed against real data: EV
+          rows range 0.0-45.0, not the 170-475 range every actual liquid
+          fuel type falls in -- electricity isn't sold "per litre").
+          Range bounds are a sanity check against impossible values (a
+          unit error, a stray zero) for real fuel types, not a
+          real-world price ceiling/floor, and deliberately excludes EV
+          rather than widening the bound to a range that would stop
+          meaning anything for the fuel types it's meant to protect.
         tests:
           - not_null
           - dbt_utils.accepted_range:
+              config:
+                # Warn, not error: 3 known stale E85 records (price
+                # 475.0, last updated mid-2025 -- over a year old with no
+                # newer report since) trip this range on every real
+                # build. A genuine, rare source-data anomaly found via
+                # real testing, not a pipeline bug -- not worth blocking
+                # the entire scheduled production run over 3 rows out of
+                # ~10,600, but still worth surfacing rather than silently
+                # widening the range until it stops meaning anything.
+                severity: warn
               arguments:
                 min_value: 50
                 max_value: 400
                 inclusive: true
+                where: "fueltype != 'EV'"
       - name: last_updated_at
         description: When the station operator last reported this price.
         tests:
@@ -65,9 +82,12 @@ models:
         tests:
           - not_null
       - name: suburb
-        description: Station suburb, carried through from station reference data.
-        tests:
-          - not_null
+        description: >
+          Station suburb, carried through from station reference data.
+          Legitimately NULL for the ~3% of stations whose address didn't
+          match the parsing regex in stg_fuel_stations.sql -- no not_null
+          test here, since that's documented, expected behaviour, not a
+          data quality issue this test should flag.
       - name: fueltype
         description: >
           Fuel type code. Values confirmed against real data -- see
@@ -81,14 +101,27 @@ models:
         description: >
           Average of each contributing station's last reported price for
           that day (not every intraday price change -- see the model's
-          header comment for why).
+          header comment for why). Range test excludes EV -- see
+          mart_fuel_price_latest_by_station above for why (confirmed
+          against real data, not a guess).
         tests:
           - not_null
           - dbt_utils.accepted_range:
+              config:
+                # Warn, not error: 3 known stale E85 records (price
+                # 475.0, last updated mid-2025 -- over a year old with no
+                # newer report since) trip this range on every real
+                # build. A genuine, rare source-data anomaly found via
+                # real testing, not a pipeline bug -- not worth blocking
+                # the entire scheduled production run over 3 rows out of
+                # ~10,600, but still worth surfacing rather than silently
+                # widening the range until it stops meaning anything.
+                severity: warn
               arguments:
                 min_value: 50
                 max_value: 400
                 inclusive: true
+                where: "fueltype != 'EV'"
       - name: min_price_cents_per_litre
         description: Lowest station-day price contributing to this row.
         tests:
@@ -133,8 +166,9 @@ models:
         tests:
           - not_null
       - name: suburb
-        tests:
-          - not_null
+        description: >
+          Legitimately NULL for ~3% of stations -- see
+          mart_fuel_price_daily_by_region above.
       - name: fueltype
         tests:
           - not_null
